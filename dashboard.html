@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - QR Attendance</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>Dashboard</h1>
+    <p>Welcome, <strong id="adminName"></strong>!</p>
+    <p><a href="attendees.html">Manage Attendees</a></p>
+    <button id="logoutBtn">Log out</button>
+  </main>
+
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    requireLogin(); // kicks out anyone who isn't logged in
+    document.getElementById("adminName").textContent = getLoggedInAdmin();
+    document.getElementById("logoutBtn").addEventListener("click", logout);
+  </script>
+</body>
+</html>

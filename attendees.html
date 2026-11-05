@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendees - QR Attendance</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="container wide">
+    <p><a href="dashboard.html">&larr; Back to dashboard</a></p>
+    <h1>Manage Attendees</h1>
+
+    <form id="attendeeForm">
+      <label for="idNumber">ID Number</label>
+     <input type="text" id="idNumber" inputmode="numeric" maxlength="8" placeholder="e.g. 00012345">
+
+      <label for="name">Full Name (Last Name, First Name)</label>
+      <input type="text" id="name" placeholder="e.g. Dela Cruz, Juan M.">
+
+            <label for="section">Course / Program</label>
+      <select id="section">
+        <option value="">-- Select course --</option>
+
+        <optgroup label="Engineering">
+          <option value="BSCpE">BS in Computer Engineering</option>
+          <option value="BSEE">BS in Electrical Engineering</option>
+          <option value="BSECE">BS in Electronics Engineering</option>
+          <option value="BSME">BS in Mechanical Engineering</option>
+          <option value="BSCE">BS in Civil Engineering</option>
+        </optgroup>
+
+        <optgroup label="Accountancy and Business Education">
+          <option value="BSA">BS in Accountancy</option>
+          <option value="BSBA-MM">BS in Business Administration (Major in Management)</option>
+        </optgroup>
+
+        <optgroup label="Education">
+          <option value="BEEd">Bachelor of Elementary Education</option>
+          <option value="BSEd-GS">Bachelor of Secondary Education (Major in General Science)</option>
+        </optgroup>
+
+        <optgroup label="Criminal Justice Education">
+          <option value="BSCrim">BS in Criminology</option>
+        </optgroup>
+
+        <optgroup label="Maritime Studies">
+          <option value="BSMarE">BS in Marine Engineering</option>
+          <option value="BSMT">BS in Marine Transportation</option>
+        </optgroup>
+
+        <optgroup label="Hospitality and Tourism Management">
+          <option value="BSHM">BS in Hospitality Management</option>
+          <option value="BSTM">BS in Tourism Management</option>
+        </optgroup>
+
+        <optgroup label="Computer Studies">
+          <option value="BSCS">BS in Computer Science</option>
+          <option value="BSIT">BS in Information Technology</option>
+        </optgroup>
+      </select>
+
+      <label for="yearLevel">Year Level</label>
+      <select id="yearLevel">
+        <option value="">-- Select year level --</option>
+        <option value="1st Year">1st Year</option>
+        <option value="2nd Year">2nd Year</option>
+        <option value="3rd Year">3rd Year</option>
+        <option value="4th Year">4th Year</option>
+      </select>
+
+      <button type="submit" id="saveBtn">Add attendee</button>
+      <button type="button" id="cancelBtn" class="secondary" style="display:none;">Cancel</button>
+    </form>
+
+    <p id="message" class="message"></p>
+
+    <h2>Attendee List</h2>
+    <p id="count"></p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID Number</th>
+            <th>Name</th>
+            <th>Program / Year</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="attendeeBody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/attendees.js"></script>
+  <script>
+    requireLogin(); // only logged-in admins allowed
+    initDatabase();
+
+    document.getElementById("attendeeForm").addEventListener("submit", handleSubmit);
+    document.getElementById("cancelBtn").addEventListener("click", function () {
+      resetForm();
+      showMessage("", "");
+    });
+
+    renderTable();
+  </script>
+</body>
+</html>

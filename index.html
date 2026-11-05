@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login - QR Attendance</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>QR Attendance System</h1>
+    <h2 id="formTitle">Admin Login</h2>
+
+    <form id="authForm">
+      <label for="username">Username</label>
+      <input type="text" id="username" required>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" required>
+
+      <button type="submit" id="submitBtn">Log in</button>
+    </form>
+
+    <p id="message" class="message"></p>
+  </main>
+
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    initDatabase();
+
+    // If already logged in, go straight to the dashboard
+    if (getLoggedInAdmin()) {
+      window.location.href = "dashboard.html";
+    }
+
+    const form = document.getElementById("authForm");
+    const message = document.getElementById("message");
+    const isFirstTime = !adminExists();
+
+    // First time: change the form into "create account" mode
+    if (isFirstTime) {
+      document.getElementById("formTitle").textContent = "Create Admin Account";
+      document.getElementById("submitBtn").textContent = "Create account";
+    }
+
+    form.addEventListener("submit", async function (event) {
+      event.preventDefault(); // stop the page from reloading
+
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      let error;
+
+      if (isFirstTime) {
+        error = await createAdmin(username, password);
+        if (!error) error = await login(username, password);
+      } else {
+        error = await login(username, password);
+      }
+
+      if (error) {
+        message.textContent = error;
+        message.className = "message error";
+      } else {
+        window.location.href = "dashboard.html";
+      }
+    });
+  </script>
+</body>
+</html>

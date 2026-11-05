@@ -1,0 +1,126 @@
+/* Basic mobile-friendly styling */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: #f4f6f8;
+  color: #222;
+}
+
+.container {
+  max-width: 600px;
+  margin: 40px auto;
+  padding: 24px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  margin-top: 0;
+}
+
+
+/* Forms */
+label {
+  display: block;
+  margin: 12px 0 4px;
+  font-weight: bold;
+}
+
+input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 16px;
+}
+
+button {
+  margin-top: 16px;
+  padding: 10px 18px;
+  background: #1a73e8;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1557b0;
+}
+
+/* Messages */
+.message {
+  margin-top: 12px;
+  font-weight: bold;
+}
+
+.error {
+  color: #d93025;
+}
+
+.success {
+  color: #188038;
+}
+/* Wider container for tables */
+.container.wide {
+  max-width: 900px;
+}
+
+/* Secondary and danger buttons */
+button.secondary {
+  background: #6b7280;
+  margin-left: 8px;
+}
+
+button.secondary:hover {
+  background: #4b5563;
+}
+
+button.small {
+  margin: 0 6px 0 0;
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+button.danger {
+  background: #d93025;
+}
+
+button.danger:hover {
+  background: #a52714;
+}
+
+/* Table */
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+th {
+  background: #f3f4f6;
+}
+
+select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 16px;
+  background: #fff;
+}
