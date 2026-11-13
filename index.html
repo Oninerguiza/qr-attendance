@@ -3,66 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Login - QR Attendance</title>
+  <title>Admin login - QR Attendance</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <main class="container">
-    <h1>QR Attendance System</h1>
-    <h2 id="formTitle">Admin Login</h2>
+    <h1>Admin login</h1>
 
-    <form id="authForm">
-      <label for="username">Username</label>
-      <input type="text" id="username" required>
+    <form id="loginForm">
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="username" required>
 
       <label for="password">Password</label>
-      <input type="password" id="password" required>
+      <input type="password" id="password" autocomplete="current-password" required>
 
-      <button type="submit" id="submitBtn">Log in</button>
+      <button type="submit" id="loginBtn">Sign in</button>
     </form>
 
-    <p id="message" class="message"></p>
+    <p id="message" class="message" aria-live="polite"></p>
   </main>
 
-  <script src="js/db.js"></script>
-  <script src="js/auth.js"></script>
-  <script>
-    initDatabase();
+  <script type="module">
+    import { auth, signInWithEmailAndPassword, onAuthStateChanged } from "./js/firebase-init.js";
 
-    // If already logged in, go straight to the dashboard
-    if (getLoggedInAdmin()) {
-      window.location.href = "dashboard.html";
-    }
-
-    const form = document.getElementById("authForm");
     const message = document.getElementById("message");
-    const isFirstTime = !adminExists();
+    const loginBtn = document.getElementById("loginBtn");
 
-    // First time: change the form into "create account" mode
-    if (isFirstTime) {
-      document.getElementById("formTitle").textContent = "Create Admin Account";
-      document.getElementById("submitBtn").textContent = "Create account";
+    function show(text, type) {
+      message.textContent = text;
+      message.className = "message " + (type || "");
     }
 
-    form.addEventListener("submit", async function (event) {
-      event.preventDefault(); // stop the page from reloading
+    // Already signed in? Go straight to the dashboard.
+    onAuthStateChanged(auth, function (user) {
+      if (user) window.location.href = "dashboard.html";
+    });
 
-      const username = document.getElementById("username").value;
+    document.getElementById("loginForm").addEventListener("submit", async function (event) {
+      event.preventDefault();
+
+      const email = document.getElementById("email").value.trim();
       const password = document.getElementById("password").value;
-      let error;
 
-      if (isFirstTime) {
-        error = await createAdmin(username, password);
-        if (!error) error = await login(username, password);
-      } else {
-        error = await login(username, password);
-      }
+      loginBtn.disabled = true;
+      show("Signing in...");
 
-      if (error) {
-        message.textContent = error;
-        message.className = "message error";
-      } else {
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
         window.location.href = "dashboard.html";
+      } catch (error) {
+        loginBtn.disabled = false;
+        if (error.code === "auth/invalid-credential" ||
+            error.code === "auth/wrong-password" ||
+            error.code === "auth/user-not-found") {
+          show("Wrong email or password.", "error");
+        } else if (error.code === "auth/too-many-requests") {
+          show("Too many attempts. Wait a few minutes and try again.", "error");
+        } else if (error.code === "auth/operation-not-allowed") {
+          show("Email/Password sign-in is not turned on in Firebase Authentication.", "error");
+        } else {
+          show("Could not sign in: " + error.message, "error");
+        }
       }
     });
   </script>

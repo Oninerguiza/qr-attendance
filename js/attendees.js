@@ -1,6 +1,30 @@
-// Attendee management: add, edit, delete, list
+// Attendee management: add, edit, delete, list (saved online in Firestore)
+// The document ID of each attendee is their 8-digit ID number.
+// The QR check-in page relies on this.
 
-let editingId = null; // null = adding new, otherwise the id being edited
+import {
+  auth, db, onAuthStateChanged,
+  collection, doc, setDoc, getDocs, deleteDoc
+} from "./firebase-init.js";
+
+let editingId = null;      // null = adding new, otherwise the ID number being edited
+let attendeesCache = [];   // list of attendees loaded from Firestore
+
+// Load every attendee from Firestore into attendeesCache
+async function loadAttendees() {
+  const snapshot = await getDocs(collection(db, "attendees"));
+  attendeesCache = snapshot.docs.map(function (d) {
+    const data = d.data();
+    return {
+      id: d.id,                       // same as the ID number
+      idNumber: data.idNumber || d.id,
+      name: data.name || "",
+      section: data.section || "",
+      yearLevel: data.yearLevel || ""
+    };
+  });
+  attendeesCache.sort(function (a, b) { return a.name.localeCompare(b.name); });
+}
 
 // Check the input. Returns an error message, or "" if everything is OK.
 function validateAttendee(idNumber, name, section, yearLevel, currentId) {
@@ -19,7 +43,7 @@ function validateAttendee(idNumber, name, section, yearLevel, currentId) {
   }
 
   // No duplicate ID numbers
-  const duplicate = getData("attendees").some(function (a) {
+  const duplicate = attendeesCache.some(function (a) {
     return a.idNumber === idNumber && a.id !== currentId;
   });
   if (duplicate) {
@@ -30,37 +54,37 @@ function validateAttendee(idNumber, name, section, yearLevel, currentId) {
 }
 
 // Add a new attendee
-function addAttendee(idNumber, name, section, yearLevel) {
-  const attendees = getData("attendees");
-  attendees.push({
-    id: Date.now(),
+async function addAttendee(idNumber, name, section, yearLevel) {
+  await setDoc(doc(db, "attendees", idNumber), {
     idNumber: idNumber,
     name: name,
     section: section,
     yearLevel: yearLevel
   });
-  saveData("attendees", attendees);
+  attendeesCache.push({ id: idNumber, idNumber: idNumber, name: name, section: section, yearLevel: yearLevel });
+  attendeesCache.sort(function (a, b) { return a.name.localeCompare(b.name); });
 }
 
 // Update an existing attendee
-function updateAttendee(id, idNumber, name, section, yearLevel) {
-  const attendees = getData("attendees");
-  const person = attendees.find(function (a) { return a.id === id; });
-  if (person) {
-    person.idNumber = idNumber;
-    person.name = name;
-    person.section = section;
-    person.yearLevel = yearLevel;
-    saveData("attendees", attendees);
+async function updateAttendee(oldId, idNumber, name, section, yearLevel) {
+  await setDoc(doc(db, "attendees", idNumber), {
+    idNumber: idNumber,
+    name: name,
+    section: section,
+    yearLevel: yearLevel
+  });
+
+  // If the ID number changed, the document ID changes too, so remove the old one
+  if (oldId !== idNumber) {
+    await deleteDoc(doc(db, "attendees", oldId));
   }
+  await loadAttendees();
 }
 
 // Delete an attendee
-function deleteAttendee(id) {
-  const attendees = getData("attendees").filter(function (a) {
-    return a.id !== id;
-  });
-  saveData("attendees", attendees);
+async function deleteAttendee(id) {
+  await deleteDoc(doc(db, "attendees", id));
+  attendeesCache = attendeesCache.filter(function (a) { return a.id !== id; });
 }
 
 // Show a message under the form
@@ -99,7 +123,7 @@ function makeCell(text) {
 
 // Draw the attendee table
 function renderTable() {
-  const attendees = getData("attendees");
+  const attendees = attendeesCache;
   const tbody = document.getElementById("attendeeBody");
   tbody.innerHTML = "";
 
@@ -136,12 +160,16 @@ function renderTable() {
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "Delete";
     deleteBtn.className = "small danger";
-    deleteBtn.addEventListener("click", function () {
+    deleteBtn.addEventListener("click", async function () {
       if (confirm("Delete " + person.name + "?")) {
-        deleteAttendee(person.id);
-        if (editingId === person.id) resetForm();
-        showMessage("Attendee deleted.", "success");
-        renderTable();
+        try {
+          await deleteAttendee(person.id);
+          if (editingId === person.id) resetForm();
+          showMessage("Attendee deleted.", "success");
+          renderTable();
+        } catch (error) {
+          showMessage("Could not delete: " + error.message, "error");
+        }
       }
     });
 
@@ -153,7 +181,7 @@ function renderTable() {
 }
 
 // Handle the form submit (add or update)
-function handleSubmit(event) {
+async function handleSubmit(event) {
   event.preventDefault();
 
   const idNumber = document.getElementById("idNumber").value.trim();
@@ -167,14 +195,37 @@ function handleSubmit(event) {
     return;
   }
 
-  if (editingId === null) {
-    addAttendee(idNumber, name, section, yearLevel);
-    showMessage("Attendee added.", "success");
-  } else {
-    updateAttendee(editingId, idNumber, name, section, yearLevel);
-    showMessage("Attendee updated.", "success");
+  try {
+    if (editingId === null) {
+      await addAttendee(idNumber, name, section, yearLevel);
+      showMessage("Attendee added.", "success");
+    } else {
+      await updateAttendee(editingId, idNumber, name, section, yearLevel);
+      showMessage("Attendee updated.", "success");
+    }
+    resetForm();
+    renderTable();
+  } catch (err) {
+    showMessage("Could not save: " + err.message, "error");
   }
-
-  resetForm();
-  renderTable();
 }
+
+// Start the page: require sign-in, load the list, then connect the form
+onAuthStateChanged(auth, async function (user) {
+  if (!user) {
+    window.location.href = "index.html"; // login page
+    return;
+  }
+  try {
+    await loadAttendees();
+    renderTable();
+  } catch (error) {
+    showMessage("Could not load attendees: " + error.message, "error");
+  }
+});
+
+document.getElementById("attendeeForm").addEventListener("submit", handleSubmit);
+document.getElementById("cancelBtn").addEventListener("click", resetForm);
+
+// import.js uses these
+export { validateAttendee, addAttendee, renderTable, loadAttendees };

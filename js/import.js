@@ -1,4 +1,6 @@
-// Import attendees from a CSV file
+// Import attendees from a CSV file (saved online in Firestore)
+
+import { validateAttendee, addAttendee, renderTable } from "./attendees.js";
 
 // Split CSV text into rows and columns (handles "quoted, values")
 function parseCsv(text) {
@@ -70,7 +72,7 @@ function normalizeYear(value) {
 }
 
 // Validate and save each row. Row 1 is the header, so we start at 2.
-function importRows(rows) {
+async function importRows(rows) {
   const errors = [];
   let added = 0;
 
@@ -99,26 +101,23 @@ function importRows(rows) {
       continue;
     }
 
-    const list = getData("attendees");
-    list.push({
-      id: Date.now() + i, // + i keeps every id unique
-      idNumber: idNumber,
-      name: name,
-      section: program,
-      yearLevel: year
-    });
-    saveData("attendees", list);
-    added++;
+    try {
+      await addAttendee(idNumber, name, program, year);
+      added++;
+    } catch (err) {
+      errors.push("Row " + rowNumber + ": could not save (" + err.message + ").");
+    }
   }
 
   return { added: added, errors: errors };
 }
 
 // When the Import button is clicked
-function handleImport() {
+async function handleImport() {
   const file = document.getElementById("importFile").files[0];
   const message = document.getElementById("importMessage");
   const errorList = document.getElementById("importErrors");
+  const importBtn = document.getElementById("importBtn");
   errorList.innerHTML = "";
 
   if (!file) {
@@ -133,7 +132,7 @@ function handleImport() {
   }
 
   const reader = new FileReader();
-  reader.onload = function () {
+  reader.onload = async function () {
     const rows = parseCsv(reader.result);
 
     if (rows.length < 2) {
@@ -142,8 +141,13 @@ function handleImport() {
       return;
     }
 
-    const result = importRows(rows);
+    importBtn.disabled = true;
+    message.textContent = "Importing...";
+    message.className = "message";
 
+    const result = await importRows(rows);
+
+    importBtn.disabled = false;
     message.textContent = "Imported " + result.added + " attendee(s). Skipped " + result.errors.length + " row(s).";
     message.className = result.errors.length === 0 ? "message success" : "message error";
 

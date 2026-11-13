@@ -1,0 +1,242 @@
+<!-- session.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance session</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .field {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      margin: 6px 0 14px;
+      font-size: 1rem;
+      border: 2px solid #c9b8f5;
+      border-radius: 8px;
+    }
+    .field:focus { outline: 3px solid #6d28d9; border-color: #6d28d9; }
+    #qrBox { display: flex; justify-content: center; margin: 20px 0; }
+    #qrBox img, #qrBox canvas { max-width: 100%; height: auto; }
+    .count { font-size: 2.4rem; font-weight: 700; margin: 0; }
+    #list { max-height: 260px; overflow-y: auto; padding-left: 20px; }
+    #list li { margin-bottom: 4px; }
+    .time { color: #6b7280; font-size: 0.9rem; margin-left: 6px; }
+    .hidden { display: none; }
+    #linkText { word-break: break-all; font-size: 0.85rem; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    #endedBox {
+      background: #ede9fe;
+      border: 2px solid #6d28d9;
+      border-radius: 8px;
+      padding: 14px;
+      margin: 16px 0;
+    }
+    #endedBox p { margin: 0 0 12px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Attendance session</h1>
+
+    <section id="setup">
+      <label for="sessionName">Session name</label>
+      <input id="sessionName" class="field" type="text" placeholder="Flag ceremony, Nov 13">
+
+      <label for="baseUrl">Address students' phones will open (must work on their phones)</label>
+      <input id="baseUrl" class="field" type="text" placeholder="http://192.168.1.5:5500/">
+
+      <button id="startBtn">Start session</button>
+    </section>
+
+    <section id="live" class="hidden">
+      <h2 id="liveName"></h2>
+      <div id="qrBox"></div>
+      <p id="linkText"></p>
+      <p id="rotateNote">The QR code changes every 30 seconds.</p>
+
+      <div id="endedBox" class="hidden">
+        <p>Session ended. The QR code no longer works.</p>
+        <button id="newBtn">Start a new session</button>
+      </div>
+
+      <p class="count"><span id="count">0</span> checked in</p>
+      <ol id="list"></ol>
+      <button id="endBtn">End session</button>
+    </section>
+
+    <p id="result" class="message" aria-live="polite"></p>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script type="module">
+    import {
+      auth, db, onAuthStateChanged,
+      collection, doc, addDoc, updateDoc, getDocs, query, where, onSnapshot, serverTimestamp
+    } from "./js/firebase-init.js";
+
+    const ROTATE_MS = 30000;
+
+    const result = document.getElementById("result");
+    const baseUrl = document.getElementById("baseUrl");
+    let sessionRef = null;
+    let sessionId = null;
+    let currentToken = "";
+    let timer = null;
+    let unsubscribe = null;
+    let qr = null;
+    let ended = false;   // becomes true once the session is really ended
+    let names = {};      // ID number -> name
+
+    // Admin pages require sign-in. Change index.html if your login page has another name.
+    onAuthStateChanged(auth, (user) => {
+      if (!user) window.location.href = "index.html";
+    });
+
+    // Default: this page's folder. Replace it with an address phones can reach.
+    baseUrl.value = window.location.href.replace(/session\.html.*$/, "");
+
+    function newToken() {
+      const bytes = new Uint8Array(8);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function show(text, type) {
+      result.textContent = text;
+      result.className = "message " + (type || "");
+    }
+
+    // Turns a Date into a time like "1:43:20 PM"
+    function formatTime(date) {
+      return date.toLocaleTimeString("en-PH", {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    function drawQr() {
+      if (ended) return;
+      let base = baseUrl.value.trim();
+      if (!base.endsWith("/")) base += "/";
+      const link = base + "scan.html?s=" + encodeURIComponent(sessionId) + "&t=" + currentToken;
+      const box = document.getElementById("qrBox");
+      box.innerHTML = "";
+      document.getElementById("linkText").textContent = link;
+      qr = new QRCode(box, { text: link, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
+    }
+
+    async function rotate() {
+      if (ended) return;
+      const previous = currentToken;
+      const next = newToken();
+      try {
+        // Keep the previous token valid too, so a student who scanned just before the change can still finish
+        await updateDoc(sessionRef, { token: next, prevToken: previous });
+        if (ended) return; // the session was ended while we were waiting
+        currentToken = next;
+        drawQr();
+      } catch (error) {
+        show("Could not refresh the QR code: " + error.message, "error");
+      }
+    }
+
+    document.getElementById("startBtn").addEventListener("click", async () => {
+      const name = document.getElementById("sessionName").value.trim();
+      if (!name) { show("Enter a session name first.", "error"); return; }
+
+      show("Starting...");
+      try {
+        currentToken = newToken();
+        sessionRef = await addDoc(collection(db, "sessions"), {
+          name: name,
+          active: true,
+          token: currentToken,
+          prevToken: "",
+          createdAt: serverTimestamp()
+        });
+        sessionId = sessionRef.id;
+
+        document.getElementById("setup").classList.add("hidden");
+        document.getElementById("live").classList.remove("hidden");
+        document.getElementById("liveName").textContent = name;
+        show("");
+
+        drawQr();
+        timer = setInterval(rotate, ROTATE_MS);
+
+        // Load the attendee names so the list can show them
+        const people = await getDocs(collection(db, "attendees"));
+        people.forEach(function (d) { names[d.id] = d.data().name; });
+
+        // Live list of students who checked in, with the time
+        const q = query(collection(db, "attendance"), where("sessionId", "==", sessionId));
+        unsubscribe = onSnapshot(q, (snap) => {
+          document.getElementById("count").textContent = snap.size;
+
+          // Collect each check-in with its time
+          const rows = snap.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: data.studentId,
+              time: data.createdAt ? data.createdAt.toDate() : new Date()
+            };
+          });
+
+          // Earliest check-in first
+          rows.sort((a, b) => a.time.getTime() - b.time.getTime());
+
+          const list = document.getElementById("list");
+          list.innerHTML = "";
+          rows.forEach((row) => {
+            const li = document.createElement("li");
+            li.appendChild(document.createTextNode(names[row.id] || row.id));
+
+            const t = document.createElement("span");
+            t.className = "time";
+            t.textContent = "· " + formatTime(row.time);
+            li.appendChild(t);
+
+            list.appendChild(li);
+          });
+        });
+      } catch (error) {
+        show("Failed: " + error.message, "error");
+      }
+    });
+
+    document.getElementById("endBtn").addEventListener("click", async () => {
+      const endBtn = document.getElementById("endBtn");
+      endBtn.disabled = true;
+      show("Ending session...");
+      try {
+        // Mark it inactive in the database first
+        await updateDoc(sessionRef, { active: false });
+
+        // Only after that succeeds, stop everything on this page
+        ended = true;
+        clearInterval(timer);
+        if (unsubscribe) unsubscribe();
+
+        document.getElementById("qrBox").innerHTML = "";
+        document.getElementById("linkText").textContent = "";
+        document.getElementById("rotateNote").classList.add("hidden");
+        endBtn.classList.add("hidden");
+        document.getElementById("endedBox").classList.remove("hidden");
+        document.getElementById("liveName").textContent =
+          document.getElementById("liveName").textContent + " (ended)";
+        show("");
+      } catch (error) {
+        endBtn.disabled = false;
+        show("Could not end the session: " + error.message, "error");
+      }
+    });
+
+    document.getElementById("newBtn").addEventListener("click", () => {
+      window.location.reload();
+    });
+  </script>
+</body>
+</html>

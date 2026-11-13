@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Check in</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .scan-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 14px;
+      margin: 12px 0;
+      font-size: 1.1rem;
+      border: 2px solid #c9b8f5;
+      border-radius: 8px;
+    }
+    .scan-input:focus { outline: 3px solid #6d28d9; border-color: #6d28d9; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Check in</h1>
+    <p>Type your student ID number, then tap Check in.</p>
+
+    <input id="studentId" class="scan-input" type="text" inputmode="numeric"
+           maxlength="8" autocomplete="off" placeholder="Student ID number">
+    <button id="checkInBtn">Check in</button>
+    <p id="result" class="message" aria-live="polite"></p>
+  </main>
+
+  <script type="module">
+    import { db, doc, setDoc, getDoc, serverTimestamp } from "./js/firebase-init.js";
+
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("s");
+    const token = params.get("t");
+
+    const result = document.getElementById("result");
+    const btn = document.getElementById("checkInBtn");
+    const input = document.getElementById("studentId");
+    const storageKey = "checkedIn:" + sessionId;
+
+    function show(text, type) {
+      result.textContent = text;
+      result.className = "message " + (type || "");
+    }
+
+    function lockPage() {
+      input.disabled = true;
+      btn.disabled = true;
+    }
+
+    if (!sessionId || !token) {
+      show("This link is incomplete. Scan the QR code on the screen again.", "error");
+      lockPage();
+    } else {
+      // This phone already checked in for this session?
+      try {
+        const earlier = localStorage.getItem(storageKey);
+        if (earlier) {
+          show("This phone already checked in (ID " + earlier + "). Only one check-in is allowed per session.", "error");
+          lockPage();
+        }
+      } catch (e) { /* storage unavailable, the database rules still apply */ }
+    }
+
+    async function checkIn() {
+      const studentId = input.value.trim();
+      if (!/^[0-9]{8}$/.test(studentId)) {
+        show("Enter your 8-digit student ID number.", "error");
+        return;
+      }
+
+      btn.disabled = true;
+      show("Checking in...");
+
+      try {
+        // Verify the ID number is in the attendee list first
+        const found = await getDoc(doc(db, "attendees", studentId));
+        if (!found.exists()) {
+          btn.disabled = false;
+          show("ID number not found in the attendee list. Check the number and try again.", "error");
+          return;
+        }
+
+        // The record ID is SESSION_STUDENT, so the database refuses a second check-in for the same student.
+        await setDoc(doc(db, "attendance", sessionId + "_" + studentId), {
+          studentId: studentId,
+          sessionId: sessionId,
+          token: token,
+          createdAt: serverTimestamp()
+        });
+
+        try { localStorage.setItem(storageKey, studentId); } catch (e) {}
+        show("You are checked in, " + found.data().name + ". You can close this page.", "success");
+        lockPage();
+      } catch (error) {
+        btn.disabled = false;
+        if (error.code === "permission-denied") {
+          show("Check-in failed. You already checked in, or the QR code expired. Scan the QR code again if it expired.", "error");
+        } else {
+          show("Something went wrong: " + error.message, "error");
+        }
+      }
+    }
+
+    btn.addEventListener("click", checkIn);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") checkIn(); });
+  </script>
+</body>
+</html>

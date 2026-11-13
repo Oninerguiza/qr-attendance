@@ -9,17 +9,29 @@
 <body>
   <main class="container">
     <h1>Dashboard</h1>
-    <p>Welcome, <strong id="adminName"></strong>!</p>
+    <p>Welcome, <strong id="who">admin</strong>!</p>
+
+    <p><a href="session.html">Start attendance session (QR)</a></p>
     <p><a href="attendees.html">Manage Attendees</a></p>
-    <button id="logoutBtn">Log out</button>
+
+    <button type="button" id="logoutBtn">Log out</button>
   </main>
 
-  <script src="js/db.js"></script>
-  <script src="js/auth.js"></script>
-  <script>
-    requireLogin(); // kicks out anyone who isn't logged in
-    document.getElementById("adminName").textContent = getLoggedInAdmin();
-    document.getElementById("logoutBtn").addEventListener("click", logout);
+  <script type="module">
+    import { auth, onAuthStateChanged, signOut } from "./js/firebase-init.js";
+
+    onAuthStateChanged(auth, function (user) {
+      if (!user) {
+        window.location.href = "index.html";
+        return;
+      }
+      document.getElementById("who").textContent = user.email;
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", async function () {
+      await signOut(auth);
+      window.location.href = "index.html";
+    });
   </script>
 </body>
 </html>
