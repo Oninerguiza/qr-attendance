@@ -1,4 +1,16 @@
-/* Basic mobile-friendly styling */
+/* ===== Purple theme: change colors here only ===== */
+:root {
+  --purple-900: #3b0764;
+  --purple-700: #6d28d9;
+  --purple-500: #8b5cf6;
+  --purple-100: #ede9fe;
+  --purple-50: #f5f3ff;
+  --text: #1f1233;
+  --danger: #d93025;
+  --danger-dark: #a52714;
+  --success: #188038;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -6,73 +18,78 @@
 body {
   font-family: Arial, sans-serif;
   margin: 0;
-  background: #f4f6f8;
-  color: #222;
+  background: var(--purple-50);
+  color: var(--text);
 }
 
+/* ===== Layout ===== */
 .container {
   max-width: 600px;
   margin: 40px auto;
   padding: 24px;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  border-top: 6px solid var(--purple-700);
+  box-shadow: 0 4px 14px rgba(59, 7, 100, 0.12);
+}
+
+.container.wide {
+  max-width: 900px;
 }
 
 h1 {
   margin-top: 0;
+  color: var(--purple-900);
 }
 
+h2 {
+  color: var(--purple-700);
+}
 
-/* Forms */
+a {
+  color: var(--purple-700);
+}
+
+/* ===== Forms ===== */
 label {
   display: block;
   margin: 12px 0 4px;
   font-weight: bold;
 }
 
-input {
+input,
+select {
   width: 100%;
   padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
   font-size: 16px;
+  background: #fff;
 }
 
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--purple-500);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
+}
+
+/* ===== Buttons ===== */
 button {
   margin-top: 16px;
   padding: 10px 18px;
-  background: #1a73e8;
+  background: var(--purple-700);
   color: #fff;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 16px;
   cursor: pointer;
 }
 
 button:hover {
-  background: #1557b0;
+  background: var(--purple-900);
 }
 
-/* Messages */
-.message {
-  margin-top: 12px;
-  font-weight: bold;
-}
-
-.error {
-  color: #d93025;
-}
-
-.success {
-  color: #188038;
-}
-/* Wider container for tables */
-.container.wide {
-  max-width: 900px;
-}
-
-/* Secondary and danger buttons */
 button.secondary {
   background: #6b7280;
   margin-left: 8px;
@@ -89,14 +106,28 @@ button.small {
 }
 
 button.danger {
-  background: #d93025;
+  background: var(--danger);
 }
 
 button.danger:hover {
-  background: #a52714;
+  background: var(--danger-dark);
 }
 
-/* Table */
+/* ===== Messages ===== */
+.message {
+  margin-top: 12px;
+  font-weight: bold;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.success {
+  color: var(--success);
+}
+
+/* ===== Table ===== */
 .table-wrap {
   overflow-x: auto;
 }
@@ -106,21 +137,113 @@ table {
   border-collapse: collapse;
 }
 
-th, td {
+th,
+td {
   padding: 10px;
   text-align: left;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--purple-100);
 }
 
 th {
-  background: #f3f4f6;
+  background: var(--purple-100);
+  color: var(--purple-900);
 }
 
-select {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 16px;
+/* ===== ID cards ===== */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.id-card {
+  border: 2px solid var(--purple-700);
+  border-radius: 12px;
+  overflow: hidden;
+  text-align: center;
   background: #fff;
+}
+
+.id-card-header {
+  background: var(--purple-900);
+  color: #fff;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: bold;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.id-card-qr {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0 8px;
+}
+
+.id-card-qr img {
+  display: block;
+}
+
+.id-card-name {
+  font-weight: bold;
+  padding: 0 10px;
+  color: var(--purple-900);
+}
+
+.id-card-id {
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: var(--purple-700);
+  margin: 4px 0;
+}
+
+.id-card-program {
+  font-size: 14px;
+  color: #555;
+  padding-bottom: 12px;
+}
+
+.id-card-actions {
+  padding: 0 10px 12px;
+}
+
+/* ===== Mobile ===== */
+@media (max-width: 600px) {
+  .container {
+    margin: 16px 12px;
+    padding: 16px;
+  }
+}
+
+/* ===== Printing ===== */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .container {
+    box-shadow: none;
+    border-top: none;
+    margin: 0;
+    max-width: 100%;
+    padding: 0;
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .id-card {
+    break-inside: avoid;
+  }
+
+  /* Print one card only */
+  body.printing-one .id-card:not(.print-this) {
+    display: none;
+  }
 }

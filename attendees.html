@@ -74,7 +74,13 @@
     </form>
 
     <p id="message" class="message"></p>
-
+        <h2>Import from file</h2>
+    <p>Upload a CSV file with these columns: IDNumber, LastName, FirstName, Program, YearLevel.</p>
+    <input type="file" id="importFile" accept=".csv">
+    <button type="button" id="importBtn">Import</button>
+    <button type="button" id="templateBtn" class="secondary">Download template</button>
+    <p id="importMessage" class="message"></p>
+    <ul id="importErrors"></ul>
     <h2>Attendee List</h2>
     <p id="count"></p>
 
@@ -96,6 +102,7 @@
   <script src="js/db.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/attendees.js"></script>
+  <script src="js/import.js"></script>
   <script>
     requireLogin(); // only logged-in admins allowed
     initDatabase();
