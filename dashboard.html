@@ -1,3 +1,4 @@
+<!-- dashboard.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,32 +6,421 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dashboard - QR Attendance</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    .links p { margin: 6px 0; }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0 12px;
+      margin: 18px 0 4px;
+    }
+    .field {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      margin: 6px 0 12px;
+      font-size: 0.95rem;
+      border: 2px solid #c9b8f5;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .field:focus { outline: 3px solid #6d28d9; border-color: #6d28d9; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .card {
+      background: #f5f3ff;
+      border: 2px solid #c9b8f5;
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .card .label { font-size: 0.85rem; color: #4c1d95; margin: 0; }
+    .card .value { font-size: 1.9rem; font-weight: 700; margin: 4px 0 0; color: #2e1065; }
+    .card .sub { font-size: 0.8rem; color: #6b7280; margin: 2px 0 0; min-height: 1em; }
+    .card.present .value { color: #065f46; }
+    .card.late .value { color: #92400e; }
+    .card.absent .value { color: #991b1b; }
+    .tableWrap { overflow-x: auto; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e0f7; white-space: nowrap; }
+    th { background: #ede9fe; color: #4c1d95; }
+    td.num, th.num { text-align: right; }
+    td.low { color: #991b1b; font-weight: 700; }
+    .note { color: #6b7280; font-size: 0.9rem; }
+    .hidden { display: none; }
+  </style>
 </head>
 <body>
   <main class="container">
     <h1>Dashboard</h1>
     <p>Welcome, <strong id="who">admin</strong>!</p>
 
-    <p><a href="session.html">Start attendance session (QR)</a></p>
-    <p><a href="attendees.html">Manage Attendees</a></p>
+    <div class="links">
+      <p><a href="session.html">Start attendance session (QR)</a></p>
+      <p><a href="attendees.html">Manage Attendees</a></p>
+      <p><a href="records.html">Attendance records</a></p>
+    </div>
 
-    <button type="button" id="logoutBtn">Log out</button>
+    <h2>Overview</h2>
+
+    <div class="filters">
+      <div>
+        <label for="fromDate">From date</label>
+        <input id="fromDate" class="field" type="date">
+      </div>
+      <div>
+        <label for="toDate">To date</label>
+        <input id="toDate" class="field" type="date">
+      </div>
+      <div>
+        <label for="sectionFilter">Section</label>
+        <select id="sectionFilter" class="field"></select>
+      </div>
+      <div>
+        <label for="yearFilter">Year level</label>
+        <select id="yearFilter" class="field"></select>
+      </div>
+      <div>
+        <label for="sessionFilter">Session</label>
+        <select id="sessionFilter" class="field"></select>
+      </div>
+    </div>
+    <button id="clearBtn" type="button">Clear filters</button>
+
+    <div class="cards">
+      <div class="card">
+        <p class="label">Attendees</p>
+        <p class="value" id="cAttendees">–</p>
+        <p class="sub">matching the filters</p>
+      </div>
+      <div class="card">
+        <p class="label">Sessions</p>
+        <p class="value" id="cSessions">–</p>
+        <p class="sub" id="cSessionsSub"></p>
+      </div>
+      <div class="card">
+        <p class="label">Attendance rate</p>
+        <p class="value" id="cRate">–</p>
+        <p class="sub">present + late</p>
+      </div>
+      <div class="card present">
+        <p class="label">Present</p>
+        <p class="value" id="cPresent">–</p>
+        <p class="sub">on time</p>
+      </div>
+      <div class="card late">
+        <p class="label">Late</p>
+        <p class="value" id="cLate">–</p>
+        <p class="sub">after call time</p>
+      </div>
+      <div class="card absent">
+        <p class="label">Absent</p>
+        <p class="value" id="cAbsent">–</p>
+        <p class="sub">no check-in</p>
+      </div>
+    </div>
+
+    <p id="emptyNote" class="note"></p>
+
+    <label for="sortBy">Sort students by</label>
+    <select id="sortBy" class="field">
+      <option value="name">Name (A to Z)</option>
+      <option value="lowest">Lowest attendance first</option>
+      <option value="absences">Most absences first</option>
+    </select>
+
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Section</th>
+            <th>Year</th>
+            <th class="num">Present</th>
+            <th class="num">Late</th>
+            <th class="num">Absent</th>
+            <th class="num">Rate</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <p id="result" class="message" aria-live="polite"></p>
+
+    <p><button type="button" id="logoutBtn">Log out</button></p>
   </main>
 
   <script type="module">
-    import { auth, onAuthStateChanged, signOut } from "./js/firebase-init.js";
+    import {
+      auth, db, onAuthStateChanged, signOut,
+      collection, getDocs
+    } from "./js/firebase-init.js";
+
+    const el = (id) => document.getElementById(id);
+
+    let attendees = [];        // { id, name, section, yearLevel }
+    let sessions = [];         // { id, name, active, createdAt, callTime }
+    let checkins = new Map();  // sessionId -> Map(studentId -> check-in Date)
 
     onAuthStateChanged(auth, function (user) {
       if (!user) {
         window.location.href = "index.html";
         return;
       }
-      document.getElementById("who").textContent = user.email;
+      el("who").textContent = user.email;
+      loadData();
     });
 
-    document.getElementById("logoutBtn").addEventListener("click", async function () {
+    el("logoutBtn").addEventListener("click", async function () {
       await signOut(auth);
       window.location.href = "index.html";
+    });
+
+    function show(text, type) {
+      const r = el("result");
+      r.textContent = text;
+      r.className = "message " + (type || "");
+    }
+
+    async function loadData() {
+      show("Loading...");
+      try {
+        const results = await Promise.all([
+          getDocs(collection(db, "attendees")),
+          getDocs(collection(db, "sessions")),
+          getDocs(collection(db, "attendance"))
+        ]);
+        const peopleSnap = results[0];
+        const sessSnap = results[1];
+        const attSnap = results[2];
+
+        attendees = peopleSnap.docs.map(function (d) {
+          const x = d.data();
+          return {
+            id: d.id,
+            name: x.name || d.id,
+            section: x.section ? String(x.section) : "",
+            yearLevel: (x.yearLevel !== undefined && x.yearLevel !== null && x.yearLevel !== "") ? String(x.yearLevel) : ""
+          };
+        });
+
+        sessions = sessSnap.docs.map(function (d) {
+          const x = d.data();
+          return {
+            id: d.id,
+            name: x.name || "(no name)",
+            active: x.active === true,
+            createdAt: x.createdAt ? x.createdAt.toDate() : null,
+            callTime: x.callTime ? x.callTime.toDate() : null
+          };
+        });
+
+        checkins = new Map();
+        attSnap.forEach(function (d) {
+          const x = d.data();
+          if (!checkins.has(x.sessionId)) checkins.set(x.sessionId, new Map());
+          checkins.get(x.sessionId).set(x.studentId, x.createdAt ? x.createdAt.toDate() : null);
+        });
+
+        fillSectionAndYear();
+        fillSessionDropdown();
+        show("");
+        render();
+      } catch (error) {
+        show("Could not load the dashboard: " + error.message, "error");
+      }
+    }
+
+    function fillSelect(select, firstLabel, values) {
+      const keep = select.value;
+      select.innerHTML = "";
+      const first = document.createElement("option");
+      first.value = "";
+      first.textContent = firstLabel;
+      select.appendChild(first);
+      values.forEach(function (v) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        select.appendChild(o);
+      });
+      select.value = values.indexOf(keep) >= 0 ? keep : "";
+    }
+
+    function fillSectionAndYear() {
+      const sections = Array.from(new Set(attendees.map((p) => p.section).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const years = Array.from(new Set(attendees.map((p) => p.yearLevel).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      fillSelect(el("sectionFilter"), "All sections", sections);
+      fillSelect(el("yearFilter"), "All years", years);
+    }
+
+    function inRange(s) {
+      const when = s.createdAt || new Date();
+      const from = el("fromDate").value;
+      const to = el("toDate").value;
+      if (from && when < new Date(from + "T00:00:00")) return false;
+      if (to && when > new Date(to + "T23:59:59.999")) return false;
+      return true;
+    }
+
+    // The Session dropdown lists the ended sessions inside the date range
+    function fillSessionDropdown() {
+      const select = el("sessionFilter");
+      const keep = select.value;
+      const list = sessions
+        .filter((s) => !s.active && inRange(s))
+        .sort((a, b) => (b.createdAt ? b.createdAt.getTime() : 0) - (a.createdAt ? a.createdAt.getTime() : 0));
+
+      select.innerHTML = "";
+      const all = document.createElement("option");
+      all.value = "all";
+      all.textContent = "All sessions in range";
+      select.appendChild(all);
+
+      list.forEach(function (s) {
+        const o = document.createElement("option");
+        o.value = s.id;
+        const when = s.createdAt
+          ? s.createdAt.toLocaleDateString("en-PH", { month: "short", day: "numeric" }) + " · "
+          : "";
+        o.textContent = when + s.name;
+        select.appendChild(o);
+      });
+
+      const stillThere = list.some((s) => s.id === keep);
+      select.value = stillThere ? keep : "all";
+    }
+
+    function render() {
+      const section = el("sectionFilter").value;
+      const year = el("yearFilter").value;
+      const pick = el("sessionFilter").value || "all";
+      const sortBy = el("sortBy").value;
+
+      const people = attendees.filter(function (p) {
+        return (!section || p.section === section) && (!year || p.yearLevel === year);
+      });
+
+      const inRangeSessions = sessions.filter(inRange);
+      const runningCount = inRangeSessions.filter((s) => s.active).length;
+      let ended = inRangeSessions.filter((s) => !s.active);
+      if (pick !== "all") ended = ended.filter((s) => s.id === pick);
+
+      let totalPresent = 0;
+      let totalLate = 0;
+      let totalAbsent = 0;
+
+      const rows = people.map(function (p) {
+        let present = 0;
+        let late = 0;
+        let absent = 0;
+
+        ended.forEach(function (s) {
+          const map = checkins.get(s.id);
+          if (map && map.has(p.id)) {
+            const t = map.get(p.id);
+            const isLate = s.callTime !== null && t !== null && t.getTime() > s.callTime.getTime();
+            if (isLate) late++; else present++;
+          } else {
+            absent++;
+          }
+        });
+
+        totalPresent += present;
+        totalLate += late;
+        totalAbsent += absent;
+
+        const slots = present + late + absent;
+        return {
+          person: p,
+          present: present,
+          late: late,
+          absent: absent,
+          rate: slots ? Math.round(((present + late) / slots) * 100) : null
+        };
+      });
+
+      // Stat cards
+      const slotsAll = totalPresent + totalLate + totalAbsent;
+      el("cAttendees").textContent = people.length;
+      el("cSessions").textContent = ended.length;
+      el("cSessionsSub").textContent = runningCount ? "+ " + runningCount + " still running" : "";
+      el("cRate").textContent = slotsAll ? Math.round(((totalPresent + totalLate) / slotsAll) * 100) + "%" : "–";
+      el("cPresent").textContent = totalPresent;
+      el("cLate").textContent = totalLate;
+      el("cAbsent").textContent = totalAbsent;
+
+      // Helpful message when there is nothing to count
+      if (attendees.length === 0) {
+        el("emptyNote").textContent = "No attendees yet. Add some in Manage Attendees.";
+      } else if (people.length === 0) {
+        el("emptyNote").textContent = "No attendees match these filters.";
+      } else if (ended.length === 0) {
+        el("emptyNote").textContent = "No ended sessions in this range yet. Rates appear after you end a session.";
+      } else {
+        el("emptyNote").textContent = "";
+      }
+
+      // Sorting
+      rows.sort(function (a, b) {
+        if (sortBy === "lowest") {
+          const ra = a.rate === null ? 101 : a.rate;
+          const rb = b.rate === null ? 101 : b.rate;
+          if (ra !== rb) return ra - rb;
+        } else if (sortBy === "absences") {
+          if (b.absent !== a.absent) return b.absent - a.absent;
+        }
+        return a.person.name.localeCompare(b.person.name);
+      });
+
+      // Table
+      const tbody = el("rows");
+      tbody.innerHTML = "";
+      rows.forEach(function (r) {
+        const tr = document.createElement("tr");
+
+        function cell(text, className) {
+          const td = document.createElement("td");
+          td.textContent = text;
+          if (className) td.className = className;
+          tr.appendChild(td);
+        }
+
+        cell(r.person.name);
+        cell(r.person.section || "–");
+        cell(r.person.yearLevel || "–");
+        cell(r.present, "num");
+        cell(r.late, "num");
+        cell(r.absent, "num");
+        cell(r.rate === null ? "–" : r.rate + "%", "num" + (r.rate !== null && r.rate < 75 ? " low" : ""));
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Filters
+    el("fromDate").addEventListener("change", function () { fillSessionDropdown(); render(); });
+    el("toDate").addEventListener("change", function () { fillSessionDropdown(); render(); });
+    el("sectionFilter").addEventListener("change", render);
+    el("yearFilter").addEventListener("change", render);
+    el("sessionFilter").addEventListener("change", render);
+    el("sortBy").addEventListener("change", render);
+
+    el("clearBtn").addEventListener("click", function () {
+      el("fromDate").value = "";
+      el("toDate").value = "";
+      el("sectionFilter").value = "";
+      el("yearFilter").value = "";
+      el("sortBy").value = "name";
+      fillSessionDropdown();
+      el("sessionFilter").value = "all";
+      render();
     });
   </script>
 </body>

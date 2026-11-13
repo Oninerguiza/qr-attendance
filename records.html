@@ -1,0 +1,384 @@
+<!-- records.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance records</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .field {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      margin: 6px 0 14px;
+      font-size: 1rem;
+      border: 2px solid #c9b8f5;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .field:focus { outline: 3px solid #6d28d9; border-color: #6d28d9; }
+    #sessionList { list-style: none; padding: 0; margin: 0 0 20px; max-height: 260px; overflow-y: auto; }
+    #sessionList li { margin-bottom: 6px; }
+    .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .tableWrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e0f7; }
+    th { background: #ede9fe; color: #4c1d95; }
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .badge.present { background: #d1fae5; color: #065f46; }
+    .badge.late { background: #fef3c7; color: #92400e; }
+    .badge.absent { background: #fee2e2; color: #991b1b; }
+    .badge.notyet { background: #e5e7eb; color: #374151; }
+    .hidden { display: none; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* Session buttons: fixed colors for every state, so the text is always readable */
+    button.sessionBtn,
+    button.sessionBtn:hover,
+    button.sessionBtn:focus,
+    button.sessionBtn:focus-visible,
+    button.sessionBtn:active {
+      width: 100%;
+      text-align: left;
+      padding: 10px 12px;
+      background: #ffffff !important;
+      color: #2e1065 !important;
+      border: 2px solid #c9b8f5;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      box-shadow: none;
+      transform: none;
+    }
+    button.sessionBtn:hover { background: #f5f3ff !important; }
+    button.sessionBtn.selected,
+    button.sessionBtn.selected:hover,
+    button.sessionBtn.selected:focus,
+    button.sessionBtn.selected:focus-visible,
+    button.sessionBtn.selected:active {
+      background: #ede9fe !important;
+      color: #2e1065 !important;
+      border-color: #6d28d9;
+      font-weight: 700;
+    }
+
+    /* Delete button: red, with its own colors for every state */
+    button.dangerBtn,
+    button.dangerBtn:hover,
+    button.dangerBtn:focus,
+    button.dangerBtn:active {
+      background: #b91c1c !important;
+      color: #ffffff !important;
+      border: none;
+      box-shadow: none;
+    }
+    button.dangerBtn:hover { background: #991b1b !important; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Attendance records</h1>
+    <p><a href="dashboard.html">Back to dashboard</a></p>
+
+    <label for="sortOrder">Sort sessions by date</label>
+    <select id="sortOrder" class="field">
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+    </select>
+
+    <ul id="sessionList"></ul>
+
+    <section id="detail" class="hidden">
+      <h2 id="detailName"></h2>
+      <p id="detailInfo"></p>
+      <button id="endOldBtn" type="button" class="hidden">End this session</button>
+      <button id="deleteBtn" type="button" class="dangerBtn hidden">Delete this session</button>
+      <div class="summary" id="summary"></div>
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr><th>Name</th><th>ID number</th><th>Status</th><th>Time in</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p id="result" class="message" aria-live="polite"></p>
+  </main>
+
+  <script type="module">
+    import {
+      auth, db, onAuthStateChanged,
+      collection, doc, getDocs, updateDoc, query, where
+    } from "./js/firebase-init.js";
+    // deleteDoc is read from here so the page still loads even if firebase-init.js doesn't export it yet
+    import * as fb from "./js/firebase-init.js";
+
+    const result = document.getElementById("result");
+    const sortOrder = document.getElementById("sortOrder");
+    const endOldBtn = document.getElementById("endOldBtn");
+    const deleteBtn = document.getElementById("deleteBtn");
+    let sessions = [];
+    let people = {};      // ID number -> name
+    let selectedId = null;
+
+    // Admin pages require sign-in.
+    onAuthStateChanged(auth, (user) => {
+      if (!user) { window.location.href = "index.html"; return; }
+      loadAll();
+    });
+
+    function show(text, type) {
+      result.textContent = text;
+      result.className = "message " + (type || "");
+    }
+
+    function fmtDate(d) {
+      return d ? d.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" }) : "No date";
+    }
+    function fmtClock(d) {
+      return d ? d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" }) : "";
+    }
+    function fmtTime(d) {
+      return d ? d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : "";
+    }
+    function lateText(ms) {
+      const mins = Math.floor(ms / 60000);
+      return mins < 1 ? "Late (<1 min)" : "Late (" + mins + " min)";
+    }
+    function makeBadge(kind, text) {
+      const b = document.createElement("span");
+      b.className = "badge " + kind;
+      b.textContent = text;
+      return b;
+    }
+
+    async function loadAll() {
+      show("Loading...");
+      try {
+        const sessSnap = await getDocs(collection(db, "sessions"));
+        const peopleSnap = await getDocs(collection(db, "attendees"));
+
+        sessions = sessSnap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            name: data.name || "(no name)",
+            active: data.active === true,
+            createdAt: data.createdAt ? data.createdAt.toDate() : null,
+            callTime: data.callTime ? data.callTime.toDate() : null
+          };
+        });
+
+        people = {};
+        peopleSnap.forEach((d) => { people[d.id] = d.data().name || d.id; });
+
+        show(sessions.length === 0 ? "No sessions yet. Start one from the dashboard." : "");
+        renderSessionList();
+      } catch (error) {
+        show("Could not load records: " + error.message, "error");
+      }
+    }
+
+    function renderSessionList() {
+      const list = document.getElementById("sessionList");
+      const stamp = (s) => (s.createdAt ? s.createdAt.getTime() : 0);
+      const sorted = sessions.slice().sort((a, b) =>
+        sortOrder.value === "oldest" ? stamp(a) - stamp(b) : stamp(b) - stamp(a)
+      );
+
+      list.innerHTML = "";
+      sorted.forEach((s) => {
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "sessionBtn" + (s.id === selectedId ? " selected" : "");
+        btn.textContent = fmtDate(s.createdAt) + " " + fmtClock(s.createdAt) + " · " + s.name + (s.active ? " (running)" : "");
+        btn.addEventListener("click", () => openSession(s));
+        li.appendChild(btn);
+        list.appendChild(li);
+      });
+    }
+
+    sortOrder.addEventListener("change", renderSessionList);
+
+    async function openSession(s) {
+      selectedId = s.id;
+      renderSessionList();
+      show("Loading attendance...");
+      try {
+        const snap = await getDocs(query(collection(db, "attendance"), where("sessionId", "==", s.id)));
+        const checked = new Map(); // ID -> check-in time
+        snap.forEach((d) => {
+          const data = d.data();
+          checked.set(data.studentId, data.createdAt ? data.createdAt.toDate() : null);
+        });
+
+        // Everyone in Manage Attendees, plus anyone who checked in but was deleted later
+        const ids = new Set(Object.keys(people));
+        checked.forEach((t, id) => ids.add(id));
+
+        let presentCount = 0;
+        let lateCount = 0;
+        let missingCount = 0;
+        const rows = [];
+
+        ids.forEach((id) => {
+          const name = people[id] || id;
+          if (checked.has(id)) {
+            const time = checked.get(id);
+            const isLate = s.callTime !== null && time !== null && time.getTime() > s.callTime.getTime();
+            if (isLate) {
+              lateCount++;
+              rows.push({ id: id, name: name, time: time, kind: "late", text: lateText(time.getTime() - s.callTime.getTime()) });
+            } else {
+              presentCount++;
+              rows.push({ id: id, name: name, time: time, kind: "present", text: "Present" });
+            }
+          } else {
+            missingCount++;
+            rows.push({
+              id: id, name: name, time: null,
+              kind: s.active ? "notyet" : "absent",
+              text: s.active ? "Not yet" : "Absent"
+            });
+          }
+        });
+
+        // Check-ins first (earliest first), then the rest by name
+        rows.sort((a, b) => {
+          if (a.time && b.time) return a.time.getTime() - b.time.getTime();
+          if (a.time) return -1;
+          if (b.time) return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+        document.getElementById("detail").classList.remove("hidden");
+        document.getElementById("detailName").textContent = s.name;
+        document.getElementById("detailInfo").textContent =
+          fmtDate(s.createdAt) +
+          (s.callTime ? " · Call time: " + fmtClock(s.callTime) : " · No call time set") +
+          (s.active ? " · Session still running" : " · Session ended");
+
+        // Running session: only End. Ended session: only Delete.
+        endOldBtn.classList.toggle("hidden", !s.active);
+        deleteBtn.classList.toggle("hidden", s.active);
+
+        const summary = document.getElementById("summary");
+        summary.innerHTML = "";
+        summary.appendChild(makeBadge("present", "Present: " + presentCount));
+        summary.appendChild(makeBadge("late", "Late: " + lateCount));
+        summary.appendChild(makeBadge(s.active ? "notyet" : "absent", (s.active ? "Not yet: " : "Absent: ") + missingCount));
+
+        const tbody = document.getElementById("rows");
+        tbody.innerHTML = "";
+        rows.forEach((r) => {
+          const tr = document.createElement("tr");
+
+          const tdName = document.createElement("td");
+          tdName.textContent = r.name;
+          tr.appendChild(tdName);
+
+          const tdId = document.createElement("td");
+          tdId.textContent = r.id;
+          tr.appendChild(tdId);
+
+          const tdStatus = document.createElement("td");
+          tdStatus.appendChild(makeBadge(r.kind, r.text));
+          tr.appendChild(tdStatus);
+
+          const tdTime = document.createElement("td");
+          tdTime.textContent = r.time ? fmtTime(r.time) : "";
+          tr.appendChild(tdTime);
+
+          tbody.appendChild(tr);
+        });
+
+        show("");
+      } catch (error) {
+        show("Could not load attendance: " + error.message, "error");
+      }
+    }
+
+    // End a session that was left running (for example, the session page was closed or refreshed)
+    endOldBtn.addEventListener("click", async () => {
+      const s = sessions.find((x) => x.id === selectedId);
+      if (!s) return;
+
+      const sure = confirm(
+        "End \"" + s.name + "\"?\n\nStudents will no longer be able to check in with its QR code."
+      );
+      if (!sure) return;
+
+      endOldBtn.disabled = true;
+      try {
+        await updateDoc(doc(db, "sessions", s.id), { active: false });
+        s.active = false;
+        renderSessionList();
+        await openSession(s);
+        show("Session ended.", "success");
+      } catch (error) {
+        show("Could not end the session: " + error.message, "error");
+      } finally {
+        endOldBtn.disabled = false;
+      }
+    });
+
+    // Delete an ended session together with ALL of its attendance records
+    deleteBtn.addEventListener("click", async () => {
+      const s = sessions.find((x) => x.id === selectedId);
+      if (!s) return;
+
+      if (s.active) {
+        show("End the session first, then delete it.", "error");
+        return;
+      }
+      if (typeof fb.deleteDoc !== "function") {
+        show("deleteDoc is not exported in js/firebase-init.js yet.", "error");
+        return;
+      }
+
+      const typed = prompt(
+        "Delete \"" + s.name + "\" and ALL of its attendance records?\n\n" +
+        "This cannot be undone.\n\nType DELETE to confirm:"
+      );
+      if (typed === null) return;
+      if (typed.trim() !== "DELETE") {
+        show("Nothing was deleted. You must type DELETE exactly.", "error");
+        return;
+      }
+
+      deleteBtn.disabled = true;
+      show("Deleting...");
+      try {
+        // Attendance first, then the session, so a failure halfway can simply be retried
+        const snap = await getDocs(query(collection(db, "attendance"), where("sessionId", "==", s.id)));
+        let removed = 0;
+        for (const d of snap.docs) {
+          await fb.deleteDoc(d.ref);
+          removed++;
+        }
+        await fb.deleteDoc(doc(db, "sessions", s.id));
+
+        sessions = sessions.filter((x) => x.id !== s.id);
+        selectedId = null;
+        document.getElementById("detail").classList.add("hidden");
+        renderSessionList();
+        show("Deleted \"" + s.name + "\" and " + removed + " attendance record(s).", "success");
+      } catch (error) {
+        show("Could not delete: " + error.message, "error");
+      } finally {
+        deleteBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

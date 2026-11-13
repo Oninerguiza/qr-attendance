@@ -23,6 +23,16 @@
     #list { max-height: 260px; overflow-y: auto; padding-left: 20px; }
     #list li { margin-bottom: 4px; }
     .time { color: #6b7280; font-size: 0.9rem; margin-left: 6px; }
+    .badge {
+      display: inline-block;
+      padding: 1px 10px;
+      margin-left: 6px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    .badge.present { background: #d1fae5; color: #065f46; }
+    .badge.late { background: #fef3c7; color: #92400e; }
     .hidden { display: none; }
     #linkText { word-break: break-all; font-size: 0.85rem; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -34,6 +44,14 @@
       margin: 16px 0;
     }
     #endedBox p { margin: 0 0 12px; font-weight: 700; }
+    #absentBox {
+      background: #fef2f2;
+      border: 2px solid #fca5a5;
+      border-radius: 8px;
+      padding: 4px 14px 10px;
+      margin: 16px 0;
+    }
+    #absentList { max-height: 220px; overflow-y: auto; padding-left: 20px; }
   </style>
 </head>
 <body>
@@ -44,6 +62,9 @@
       <label for="sessionName">Session name</label>
       <input id="sessionName" class="field" type="text" placeholder="Flag ceremony, Nov 13">
 
+      <label for="callTime">Call time (optional): check-ins after this time are marked Late</label>
+      <input id="callTime" class="field" type="time">
+
       <label for="baseUrl">Address students' phones will open (must work on their phones)</label>
       <input id="baseUrl" class="field" type="text" placeholder="http://192.168.1.5:5500/">
 
@@ -52,6 +73,7 @@
 
     <section id="live" class="hidden">
       <h2 id="liveName"></h2>
+      <p id="callInfo"></p>
       <div id="qrBox"></div>
       <p id="linkText"></p>
       <p id="rotateNote">The QR code changes every 30 seconds.</p>
@@ -62,7 +84,14 @@
       </div>
 
       <p class="count"><span id="count">0</span> checked in</p>
+      <p id="lateLine"></p>
       <ol id="list"></ol>
+
+      <div id="absentBox" class="hidden">
+        <h3>Absent (<span id="absentCount">0</span>)</h3>
+        <ul id="absentList"></ul>
+      </div>
+
       <button id="endBtn">End session</button>
     </section>
 
@@ -86,8 +115,10 @@
     let timer = null;
     let unsubscribe = null;
     let qr = null;
-    let ended = false;   // becomes true once the session is really ended
-    let names = {};      // ID number -> name
+    let ended = false;          // becomes true once the session is really ended
+    let names = {};             // ID number -> name
+    let callTime = null;        // a Date, or null if no call time was set
+    let attendanceQuery = null; // used again at the end to find who is absent
 
     // Admin pages require sign-in. Change index.html if your login page has another name.
     onAuthStateChanged(auth, (user) => {
@@ -108,13 +139,14 @@
       result.className = "message " + (type || "");
     }
 
-    // Turns a Date into a time like "1:43:20 PM"
+    // "1:43:20 PM"
     function formatTime(date) {
-      return date.toLocaleTimeString("en-PH", {
-        hour: "numeric",
-        minute: "2-digit",
-        second: "2-digit"
-      });
+      return date.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    }
+
+    // "7:30 AM"
+    function formatClock(date) {
+      return date.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
     }
 
     function drawQr() {
@@ -143,9 +175,48 @@
       }
     }
 
+    // After the session ends: list everyone in Manage Attendees who never checked in
+    async function showAbsent() {
+      try {
+        const finalSnap = await getDocs(attendanceQuery);
+        const present = new Set();
+        finalSnap.forEach((d) => present.add(d.data().studentId));
+
+        const absent = Object.keys(names)
+          .filter((id) => !present.has(id))
+          .sort((a, b) => (names[a] || a).localeCompare(names[b] || b));
+
+        const list = document.getElementById("absentList");
+        list.innerHTML = "";
+        absent.forEach((id) => {
+          const li = document.createElement("li");
+          li.textContent = names[id] || id;
+          list.appendChild(li);
+        });
+        if (absent.length === 0) {
+          const li = document.createElement("li");
+          li.textContent = "Nobody is absent.";
+          list.appendChild(li);
+        }
+        document.getElementById("absentCount").textContent = absent.length;
+        document.getElementById("absentBox").classList.remove("hidden");
+      } catch (error) {
+        show("The session ended, but the absent list could not load: " + error.message, "error");
+      }
+    }
+
     document.getElementById("startBtn").addEventListener("click", async () => {
       const name = document.getElementById("sessionName").value.trim();
       if (!name) { show("Enter a session name first.", "error"); return; }
+
+      // Call time is optional. The time box gives text like "07:30".
+      callTime = null;
+      const callValue = document.getElementById("callTime").value;
+      if (callValue) {
+        const parts = callValue.split(":");
+        callTime = new Date();
+        callTime.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+      }
 
       show("Starting...");
       try {
@@ -155,6 +226,7 @@
           active: true,
           token: currentToken,
           prevToken: "",
+          callTime: callTime,
           createdAt: serverTimestamp()
         });
         sessionId = sessionRef.id;
@@ -162,6 +234,9 @@
         document.getElementById("setup").classList.add("hidden");
         document.getElementById("live").classList.remove("hidden");
         document.getElementById("liveName").textContent = name;
+        document.getElementById("callInfo").textContent = callTime
+          ? "Call time: " + formatClock(callTime) + ". Check-ins after this are marked Late."
+          : "No call time set, so nobody is marked Late.";
         show("");
 
         drawQr();
@@ -171,12 +246,11 @@
         const people = await getDocs(collection(db, "attendees"));
         people.forEach(function (d) { names[d.id] = d.data().name; });
 
-        // Live list of students who checked in, with the time
-        const q = query(collection(db, "attendance"), where("sessionId", "==", sessionId));
-        unsubscribe = onSnapshot(q, (snap) => {
+        // Live list of students who checked in, with time and Present/Late
+        attendanceQuery = query(collection(db, "attendance"), where("sessionId", "==", sessionId));
+        unsubscribe = onSnapshot(attendanceQuery, (snap) => {
           document.getElementById("count").textContent = snap.size;
 
-          // Collect each check-in with its time
           const rows = snap.docs.map((d) => {
             const data = d.data();
             return {
@@ -184,13 +258,15 @@
               time: data.createdAt ? data.createdAt.toDate() : new Date()
             };
           });
-
-          // Earliest check-in first
           rows.sort((a, b) => a.time.getTime() - b.time.getTime());
 
+          let lateCount = 0;
           const list = document.getElementById("list");
           list.innerHTML = "";
           rows.forEach((row) => {
+            const isLate = callTime !== null && row.time.getTime() > callTime.getTime();
+            if (isLate) lateCount++;
+
             const li = document.createElement("li");
             li.appendChild(document.createTextNode(names[row.id] || row.id));
 
@@ -199,8 +275,15 @@
             t.textContent = "· " + formatTime(row.time);
             li.appendChild(t);
 
+            const badge = document.createElement("span");
+            badge.className = "badge " + (isLate ? "late" : "present");
+            badge.textContent = isLate ? "Late" : "Present";
+            li.appendChild(badge);
+
             list.appendChild(li);
           });
+
+          document.getElementById("lateLine").textContent = callTime ? lateCount + " late" : "";
         });
       } catch (error) {
         show("Failed: " + error.message, "error");
@@ -228,6 +311,8 @@
         document.getElementById("liveName").textContent =
           document.getElementById("liveName").textContent + " (ended)";
         show("");
+
+        showAbsent();
       } catch (error) {
         endBtn.disabled = false;
         show("Could not end the session: " + error.message, "error");
