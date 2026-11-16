@@ -17,6 +17,17 @@
       border-radius: 8px;
     }
     .scan-input:focus { outline: 3px solid #6d28d9; border-color: #6d28d9; }
+    .hidden { display: none; }
+    .notice {
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin: 12px 0;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .notice.level1 { background: #fffbeb; border: 2px solid #f59e0b; color: #92400e; }
+    .notice.level2 { background: #fff7ed; border: 2px solid #ea580c; color: #9a3412; }
+    .notice.level3 { background: #fef2f2; border: 2px solid #dc2626; color: #991b1b; }
   </style>
 </head>
 <body>
@@ -28,6 +39,7 @@
            maxlength="8" autocomplete="off" placeholder="Student ID number">
     <button id="checkInBtn">Check in</button>
     <p id="result" class="message" aria-live="polite"></p>
+    <p id="notice" class="notice hidden" aria-live="polite"></p>
   </main>
 
   <script type="module">
@@ -38,6 +50,7 @@
     const token = params.get("t");
 
     const result = document.getElementById("result");
+    const notice = document.getElementById("notice");
     const btn = document.getElementById("checkInBtn");
     const input = document.getElementById("studentId");
     const storageKey = "checkedIn:" + sessionId;
@@ -45,6 +58,25 @@
     function show(text, type) {
       result.textContent = text;
       result.className = "message " + (type || "");
+    }
+
+    // Shows the student's absence count and what the policy says. level 0 means nothing to show.
+    function showNotice(level, absences) {
+      if (!level) {
+        notice.textContent = "";
+        notice.className = "notice hidden";
+        return;
+      }
+      let text = "You have " + absences + (absences === 1 ? " absence. " : " absences. ");
+      if (level === 1) {
+        text += "1st offense: please submit a written explanation letter to your officers.";
+      } else if (level === 2) {
+        text += "2nd offense: your parents or guardians will be summoned and a final warning letter will be issued. Any further absence means removal from the organization.";
+      } else {
+        text += "3rd offense: removal from the organization. Please see your officers.";
+      }
+      notice.textContent = text;
+      notice.className = "notice level" + level;
     }
 
     function lockPage() {
@@ -74,6 +106,7 @@
       }
 
       btn.disabled = true;
+      showNotice(0, 0);
       show("Checking in...");
 
       try {
@@ -85,8 +118,10 @@
           return;
         }
 
+        const person = found.data();
+
         // Blocked students cannot check in (the database rules refuse it too)
-        if (found.data().blocked === true) {
+        if (person.blocked === true) {
           btn.disabled = false;
           show("This ID cannot check in right now. Please see your officers.", "error");
           return;
@@ -101,7 +136,8 @@
         });
 
         try { localStorage.setItem(storageKey, studentId); } catch (e) {}
-        show("You are checked in, " + found.data().name + ". You can close this page.", "success");
+        show("You are checked in, " + person.name + ". You can close this page.", "success");
+        showNotice(Number(person.offenseLevel) || 0, Number(person.absences) || 0);
         lockPage();
       } catch (error) {
         btn.disabled = false;

@@ -1,10 +1,11 @@
+// js/attendees.js
 // Attendee management: add, edit, delete, list (saved online in Firestore)
 // The document ID of each attendee is their 8-digit ID number.
 // The QR check-in page relies on this.
 
 import {
   auth, db, onAuthStateChanged,
-  collection, doc, setDoc, getDocs, deleteDoc
+  collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTimestamp
 } from "./firebase-init.js";
 
 let editingId = null;      // null = adding new, otherwise the ID number being edited
@@ -20,7 +21,10 @@ async function loadAttendees() {
       idNumber: data.idNumber || d.id,
       name: data.name || "",
       section: data.section || "",
-      yearLevel: data.yearLevel || ""
+      yearLevel: data.yearLevel || "",
+      blocked: data.blocked === true,
+      absences: Number(data.absences) || 0,
+      offenseLevel: Number(data.offenseLevel) || 0
     };
   });
   attendeesCache.sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -53,32 +57,53 @@ function validateAttendee(idNumber, name, section, yearLevel, currentId) {
   return "";
 }
 
-// Add a new attendee
+// Add a new attendee. createdAt is the join date: sessions that started before it do not count this student.
 async function addAttendee(idNumber, name, section, yearLevel) {
   await setDoc(doc(db, "attendees", idNumber), {
     idNumber: idNumber,
     name: name,
     section: section,
-    yearLevel: yearLevel
+    yearLevel: yearLevel,
+    createdAt: serverTimestamp()
   });
-  attendeesCache.push({ id: idNumber, idNumber: idNumber, name: name, section: section, yearLevel: yearLevel });
+  attendeesCache.push({
+    id: idNumber, idNumber: idNumber, name: name, section: section,
+    yearLevel: yearLevel, blocked: false, absences: 0, offenseLevel: 0
+  });
   attendeesCache.sort(function (a, b) { return a.name.localeCompare(b.name); });
 }
 
-// Update an existing attendee
+// Update an existing attendee. The form does not edit the join date, the blocked flag or the
+// saved absence count, so keep them.
 async function updateAttendee(oldId, idNumber, name, section, yearLevel) {
-  await setDoc(doc(db, "attendees", idNumber), {
+  const oldSnap = await getDoc(doc(db, "attendees", oldId));
+  const old = oldSnap.exists() ? oldSnap.data() : {};
+
+  const data = {
     idNumber: idNumber,
     name: name,
     section: section,
     yearLevel: yearLevel
-  });
+  };
+  if (old.createdAt) data.createdAt = old.createdAt;
+  if (old.blocked === true) data.blocked = true;
+  if (old.absences !== undefined) data.absences = old.absences;
+  if (old.offenseLevel !== undefined) data.offenseLevel = old.offenseLevel;
+
+  await setDoc(doc(db, "attendees", idNumber), data);
 
   // If the ID number changed, the document ID changes too, so remove the old one
   if (oldId !== idNumber) {
     await deleteDoc(doc(db, "attendees", oldId));
   }
   await loadAttendees();
+}
+
+// Let a blocked attendee check in again
+async function unblockAttendee(id) {
+  await updateDoc(doc(db, "attendees", id), { blocked: false });
+  const person = attendeesCache.find(function (a) { return a.id === id; });
+  if (person) person.blocked = false;
 }
 
 // Delete an attendee
@@ -141,7 +166,16 @@ function renderTable() {
   attendees.forEach(function (person) {
     const row = document.createElement("tr");
     row.appendChild(makeCell(person.idNumber));
-    row.appendChild(makeCell(person.name));
+
+    // Name, with a red "(Blocked)" tag for blocked students
+    const nameCell = makeCell(person.name);
+    if (person.blocked) {
+      const tag = document.createElement("strong");
+      tag.textContent = " (Blocked)";
+      tag.style.color = "#991b1b";
+      nameCell.appendChild(tag);
+    }
+    row.appendChild(nameCell);
 
     // Program and year level together, e.g. "BSCpE - 1st Year"
     const programYear = person.yearLevel
@@ -156,6 +190,25 @@ function renderTable() {
     editBtn.textContent = "Edit";
     editBtn.className = "small";
     editBtn.addEventListener("click", function () { startEdit(person); });
+    actions.appendChild(editBtn);
+
+    if (person.blocked) {
+      const unblockBtn = document.createElement("button");
+      unblockBtn.textContent = "Unblock";
+      unblockBtn.className = "small";
+      unblockBtn.addEventListener("click", async function () {
+        if (confirm("Let " + person.name + " check in again?")) {
+          try {
+            await unblockAttendee(person.id);
+            showMessage("Attendee unblocked.", "success");
+            renderTable();
+          } catch (error) {
+            showMessage("Could not unblock: " + error.message, "error");
+          }
+        }
+      });
+      actions.appendChild(unblockBtn);
+    }
 
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "Delete";
@@ -172,9 +225,8 @@ function renderTable() {
         }
       }
     });
-
-    actions.appendChild(editBtn);
     actions.appendChild(deleteBtn);
+
     row.appendChild(actions);
     tbody.appendChild(row);
   });
