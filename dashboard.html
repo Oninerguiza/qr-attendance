@@ -204,6 +204,7 @@
             id: d.id,
             name: x.name || d.id,
             section: x.section ? String(x.section) : "",
+            joinedAt: x.createdAt ? x.createdAt.toDate() : null,
             yearLevel: (x.yearLevel !== undefined && x.yearLevel !== null && x.yearLevel !== "") ? String(x.yearLevel) : ""
           };
         });
@@ -322,6 +323,8 @@
         let absent = 0;
 
         ended.forEach(function (s) {
+                    // Added after this session started, so not counted
+          if (p.joinedAt && s.createdAt && p.joinedAt.getTime() > s.createdAt.getTime()) return;
           const map = checkins.get(s.id);
           if (map && map.has(p.id)) {
             const t = map.get(p.id);

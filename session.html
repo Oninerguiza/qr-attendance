@@ -17,6 +17,16 @@
       border-radius: 8px;
     }
     .field:focus { outline: 3px solid #6d28d9; border-color: #6d28d9; }
+    .checkRow { display: flex; align-items: center; gap: 10px; margin: 6px 0 16px; }
+    .checkRow input { width: 20px; height: 20px; }
+    .policy {
+      background: #ede9fe;
+      border: 2px solid #c9b8f5;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin: 6px 0 16px;
+    }
+    .policy ol { margin: 6px 0 0; padding-left: 22px; }
     #qrBox { display: flex; justify-content: center; margin: 20px 0; }
     #qrBox img, #qrBox canvas { max-width: 100%; height: auto; }
     .count { font-size: 2.4rem; font-weight: 700; margin: 0; }
@@ -52,6 +62,18 @@
       margin: 16px 0;
     }
     #absentList { max-height: 220px; overflow-y: auto; padding-left: 20px; }
+    #actionBox {
+      background: #fffbeb;
+      border: 2px solid #f59e0b;
+      border-radius: 8px;
+      padding: 4px 14px 10px;
+      margin: 16px 0;
+    }
+    .actionGroup h4 { margin: 12px 0 4px; }
+    .actionGroup.level1 h4 { color: #92400e; }
+    .actionGroup.level2 h4 { color: #b45309; }
+    .actionGroup.level3 h4 { color: #991b1b; }
+    .actionGroup ul { margin: 0; padding-left: 22px; }
   </style>
 </head>
 <body>
@@ -65,6 +87,25 @@
       <label for="callTime">Call time (optional): check-ins after this time are marked Late</label>
       <input id="callTime" class="field" type="time">
 
+      <label for="sectionPick">Who is expected? Only they can be marked Absent</label>
+      <select id="sectionPick" class="field">
+        <option value="">All attendees</option>
+      </select>
+
+      <div class="policy">
+        <strong>Absence policy</strong>
+        <ol>
+          <li>1st absence: written explanation letter</li>
+          <li>2nd absence: parents or guardians summoned, final warning letter</li>
+          <li>3rd absence: removal from the organization (check-in blocked)</li>
+        </ol>
+      </div>
+
+      <label class="checkRow">
+        <input id="countBox" type="checkbox" checked>
+        <span>Count this session toward absences (untick for a test)</span>
+      </label>
+
       <label for="baseUrl">Address students' phones will open (must work on their phones)</label>
       <input id="baseUrl" class="field" type="text" placeholder="http://192.168.1.5:5500/">
 
@@ -74,6 +115,7 @@
     <section id="live" class="hidden">
       <h2 id="liveName"></h2>
       <p id="callInfo"></p>
+      <p id="policyInfo"></p>
       <div id="qrBox"></div>
       <p id="linkText"></p>
       <p id="rotateNote">The QR code changes every 30 seconds.</p>
@@ -92,6 +134,11 @@
         <ul id="absentList"></ul>
       </div>
 
+      <div id="actionBox" class="hidden">
+        <h3>Actions needed</h3>
+        <div id="actionGroups"></div>
+      </div>
+
       <button id="endBtn">End session</button>
     </section>
 
@@ -107,26 +154,74 @@
 
     const ROTATE_MS = 30000;
 
+    // The absence policy: what happens at each offense
+    const OFFENSE_LIMIT = 3;
+    const OFFENSES = {
+      1: "Written explanation letter",
+      2: "Summon parents/guardians and issue a final warning letter",
+      3: "Removal from the organization (check-in blocked)"
+    };
+
     const result = document.getElementById("result");
     const baseUrl = document.getElementById("baseUrl");
+    const sectionPick = document.getElementById("sectionPick");
+    const countBox = document.getElementById("countBox");
+
     let sessionRef = null;
     let sessionId = null;
+    let sessionName = "";
     let currentToken = "";
     let timer = null;
     let unsubscribe = null;
     let qr = null;
     let ended = false;          // becomes true once the session is really ended
-    let names = {};             // ID number -> name
+    let roster = {};            // ID number -> { name, section, blocked, joinedAt }
     let callTime = null;        // a Date, or null if no call time was set
     let attendanceQuery = null; // used again at the end to find who is absent
+    let expectedSection = "";   // "" means all attendees
+    let countsTowardQuota = true;
 
-    // Admin pages require sign-in. Change index.html if your login page has another name.
-    onAuthStateChanged(auth, (user) => {
-      if (!user) window.location.href = "index.html";
+    // Admin pages require sign-in. Then load the attendee list (names, sections, blocked, join date).
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) { window.location.href = "index.html"; return; }
+      try {
+        const people = await getDocs(collection(db, "attendees"));
+        const sections = new Set();
+        people.forEach((d) => {
+          const x = d.data();
+          const sec = x.section ? String(x.section) : "";
+          roster[d.id] = {
+            name: x.name || d.id,
+            section: sec,
+            blocked: x.blocked === true,
+            joinedAt: x.createdAt ? x.createdAt.toDate() : null
+          };
+          if (sec) sections.add(sec);
+        });
+        Array.from(sections)
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+          .forEach((sec) => {
+            const o = document.createElement("option");
+            o.value = sec;
+            o.textContent = sec + " only";
+            sectionPick.appendChild(o);
+          });
+      } catch (error) {
+        show("Could not load the attendee list: " + error.message, "error");
+      }
     });
 
     // Default: this page's folder. Replace it with an address phones can reach.
     baseUrl.value = window.location.href.replace(/session\.html.*$/, "");
+
+    function nameOf(id) {
+      return roster[id] ? roster[id].name : id;
+    }
+
+    // IDs of the students this session expects
+    function expectedIds() {
+      return Object.keys(roster).filter((id) => expectedSection === "" || roster[id].section === expectedSection);
+    }
 
     function newToken() {
       const bytes = new Uint8Array(8);
@@ -175,22 +270,27 @@
       }
     }
 
-    // After the session ends: list everyone in Manage Attendees who never checked in
-    async function showAbsent() {
+    // True if this student was added after the session started, so the session should not count them
+    function joinedAfter(person, startedAt) {
+      return !!(person.joinedAt && startedAt && person.joinedAt.getTime() > startedAt.getTime());
+    }
+
+    // After the session ends: list the expected students who never checked in
+    async function showAbsent(startedAt) {
       try {
         const finalSnap = await getDocs(attendanceQuery);
         const present = new Set();
         finalSnap.forEach((d) => present.add(d.data().studentId));
 
-        const absent = Object.keys(names)
-          .filter((id) => !present.has(id))
-          .sort((a, b) => (names[a] || a).localeCompare(names[b] || b));
+        const absent = expectedIds()
+          .filter((id) => !present.has(id) && !joinedAfter(roster[id], startedAt))
+          .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 
         const list = document.getElementById("absentList");
         list.innerHTML = "";
         absent.forEach((id) => {
           const li = document.createElement("li");
-          li.textContent = names[id] || id;
+          li.textContent = nameOf(id);
           list.appendChild(li);
         });
         if (absent.length === 0) {
@@ -205,9 +305,128 @@
       }
     }
 
+    // Show who just reached each offense and what must be done
+    function renderActions(fresh) {
+      const groups = document.getElementById("actionGroups");
+      groups.innerHTML = "";
+      let total = 0;
+
+      [1, 2, 3].forEach((level) => {
+        const people = fresh[level];
+        if (people.length === 0) return;
+        total += people.length;
+
+        const box = document.createElement("div");
+        box.className = "actionGroup level" + level;
+
+        const h = document.createElement("h4");
+        h.textContent = "Offense " + level + ": " + OFFENSES[level];
+        box.appendChild(h);
+
+        const ul = document.createElement("ul");
+        people
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach((p) => {
+            const li = document.createElement("li");
+            li.textContent = p.name + " (" + p.absences + (p.absences === 1 ? " absence)" : " absences)");
+            ul.appendChild(li);
+          });
+        box.appendChild(ul);
+        groups.appendChild(box);
+      });
+
+      if (total > 0) document.getElementById("actionBox").classList.remove("hidden");
+    }
+
+    // After the session ends: count each student's absences and record any new offense
+    async function applyOffenses(sessSnap) {
+      try {
+        // Ended sessions that count toward absences (old sessions have no such flag, so they are skipped)
+        const counted = [];
+        sessSnap.forEach((d) => {
+          const x = d.data();
+          if (x.active === false && x.countsTowardQuota === true) {
+            counted.push({
+              id: d.id,
+              section: x.section ? String(x.section) : "",
+              createdAt: x.createdAt ? x.createdAt.toDate() : null
+            });
+          }
+        });
+
+        // Who checked in to which session
+        const attSnap = await getDocs(collection(db, "attendance"));
+        const present = new Map(); // sessionId -> Set of student IDs
+        attSnap.forEach((d) => {
+          const x = d.data();
+          if (!present.has(x.sessionId)) present.set(x.sessionId, new Set());
+          present.get(x.sessionId).add(x.studentId);
+        });
+
+        // Offenses already recorded, so the same offense is never created twice
+        const offSnap = await getDocs(collection(db, "offenses"));
+        const recorded = {}; // studentId -> highest offense level so far
+        offSnap.forEach((d) => {
+          const x = d.data();
+          const lvl = Number(x.level) || 0;
+          if (!recorded[x.studentId] || lvl > recorded[x.studentId]) recorded[x.studentId] = lvl;
+        });
+
+        const fresh = { 1: [], 2: [], 3: [] };
+
+        for (const id of expectedIds()) {
+          const person = roster[id];
+
+          let absences = 0;
+          counted.forEach((s) => {
+            if (joinedAfter(person, s.createdAt)) return; // not a student yet when this session started
+            const expected = s.section === "" || s.section === person.section;
+            if (!expected) return;
+            const set = present.get(s.id);
+            if (!set || !set.has(id)) absences++;
+          });
+
+          if (absences === 0) continue;
+
+          const level = Math.min(absences, OFFENSE_LIMIT);
+          const before = recorded[id] || 0;
+          if (level <= before) continue; // this offense was already recorded
+
+          // One record per offense, kept in the admin-only "offenses" collection
+          await addDoc(collection(db, "offenses"), {
+            studentId: id,
+            name: person.name,
+            level: level,
+            action: OFFENSES[level],
+            absenceCount: absences,
+            sessionId: sessionId,
+            sessionName: sessionName,
+            status: "pending",
+            createdAt: serverTimestamp()
+          });
+
+          // Third offense: removal, so block check-in
+          if (level === OFFENSE_LIMIT) {
+            await updateDoc(doc(db, "attendees", id), { blocked: true });
+            person.blocked = true;
+          }
+
+          fresh[level].push({ name: person.name, absences: absences });
+        }
+
+        renderActions(fresh);
+      } catch (error) {
+        show("The session ended, but the absence policy check failed: " + error.message, "error");
+      }
+    }
+
     document.getElementById("startBtn").addEventListener("click", async () => {
       const name = document.getElementById("sessionName").value.trim();
       if (!name) { show("Enter a session name first.", "error"); return; }
+
+      sessionName = name;
+      expectedSection = sectionPick.value;
+      countsTowardQuota = countBox.checked;
 
       // Call time is optional. The time box gives text like "07:30".
       callTime = null;
@@ -227,6 +446,8 @@
           token: currentToken,
           prevToken: "",
           callTime: callTime,
+          section: expectedSection,
+          countsTowardQuota: countsTowardQuota,
           createdAt: serverTimestamp()
         });
         sessionId = sessionRef.id;
@@ -237,14 +458,16 @@
         document.getElementById("callInfo").textContent = callTime
           ? "Call time: " + formatClock(callTime) + ". Check-ins after this are marked Late."
           : "No call time set, so nobody is marked Late.";
+
+        let info = expectedSection ? "Expected: " + expectedSection + " only." : "Expected: all attendees.";
+        info += countsTowardQuota
+          ? " An absence here counts toward the absence policy."
+          : " This session does not count toward absences.";
+        document.getElementById("policyInfo").textContent = info;
         show("");
 
         drawQr();
         timer = setInterval(rotate, ROTATE_MS);
-
-        // Load the attendee names so the list can show them
-        const people = await getDocs(collection(db, "attendees"));
-        people.forEach(function (d) { names[d.id] = d.data().name; });
 
         // Live list of students who checked in, with time and Present/Late
         attendanceQuery = query(collection(db, "attendance"), where("sessionId", "==", sessionId));
@@ -268,7 +491,7 @@
             if (isLate) lateCount++;
 
             const li = document.createElement("li");
-            li.appendChild(document.createTextNode(names[row.id] || row.id));
+            li.appendChild(document.createTextNode(nameOf(row.id)));
 
             const t = document.createElement("span");
             t.className = "time";
@@ -312,7 +535,19 @@
           document.getElementById("liveName").textContent + " (ended)";
         show("");
 
-        showAbsent();
+        // Read all sessions once: it gives this session's server start time and feeds the policy check
+        const sessSnap = await getDocs(collection(db, "sessions"));
+        let startedAt = null;
+        sessSnap.forEach((d) => {
+          if (d.id === sessionId && d.data().createdAt) startedAt = d.data().createdAt.toDate();
+        });
+
+        await showAbsent(startedAt);
+        if (countsTowardQuota) {
+          show("Checking the absence policy...");
+          await applyOffenses(sessSnap);
+          if (result.className.indexOf("error") === -1) show("");
+        }
       } catch (error) {
         endBtn.disabled = false;
         show("Could not end the session: " + error.message, "error");

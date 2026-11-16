@@ -1,3 +1,4 @@
+<!-- scan.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -81,6 +82,13 @@
         if (!found.exists()) {
           btn.disabled = false;
           show("ID number not found in the attendee list. Check the number and try again.", "error");
+          return;
+        }
+
+        // Blocked students cannot check in (the database rules refuse it too)
+        if (found.data().blocked === true) {
+          btn.disabled = false;
+          show("This ID cannot check in right now. Please see your officers.", "error");
           return;
         }
 

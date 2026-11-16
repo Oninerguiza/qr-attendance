@@ -127,7 +127,8 @@
     const endOldBtn = document.getElementById("endOldBtn");
     const deleteBtn = document.getElementById("deleteBtn");
     let sessions = [];
-    let people = {};      // ID number -> name
+    let people = {};
+    let joinedAt = {};      // ID number -> name
     let selectedId = null;
 
     // Admin pages require sign-in.
@@ -179,7 +180,11 @@
         });
 
         people = {};
-        peopleSnap.forEach((d) => { people[d.id] = d.data().name || d.id; });
+        joinedAt = {};
+        peopleSnap.forEach((d) => {
+          people[d.id] = d.data().name || d.id;
+          joinedAt[d.id] = d.data().createdAt ? d.data().createdAt.toDate() : null;
+        });
 
         show(sessions.length === 0 ? "No sessions yet. Start one from the dashboard." : "");
         renderSessionList();
